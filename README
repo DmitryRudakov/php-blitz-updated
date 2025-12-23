@@ -1,3 +1,11 @@
+# Blitz — Maintained Fork
+
+This is a maintained fork of the original Blitz project by Alexey Rybak.
+The original project has not been actively updated for some time.
+
+⚠️ Updated for modern PHP 8.3 version  
+📦 Compatibility fixes and new releases
+
 Read documentation at https://github.com/alexeyrybak/blitz/wiki
 
 ===================================================================================================

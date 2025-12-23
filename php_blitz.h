@@ -27,6 +27,7 @@ extern zend_module_entry blitz_module_entry;
 #ifdef PHP_WIN32
 #define PHP_BLITZ_API __declspec(dllexport)
 #define BLITZ_USE_STREAMS
+#define BLITZ_MAX_LEXEM_LEN 512
 #else
 #define PHP_BLITZ_API
 #endif
@@ -128,6 +129,7 @@ ZEND_END_MODULE_GLOBALS(blitz)
 #define BLITZ_TAG_COMMENT_OPEN          "/*"
 #define BLITZ_TAG_COMMENT_CLOSE          "*/"
 #define BLITZ_TAG_LIST_LEN              6
+#define BLITZ_CHAR_EXISTS_MAP_SIZE      256
 
 #define BLITZ_TAG_ID_OPEN               0
 #define BLITZ_TAG_ID_OPEN_ALT           1
@@ -174,6 +176,13 @@ ZEND_END_MODULE_GLOBALS(blitz)
         ('b' == s[0] && 'e' == s[1] && 'g' == s[2] && 'i' == s[3] && 'n' == s[4]))          \
     )
     
+#define BLITZ_STRING_IS_LITERAL(s, len)                                                                             \
+    ((7 == len) &&                                                                                                  \
+        (('L' == s[0] && 'I' == s[1] && 'T' == s[2] && 'E' == s[3] && 'R' == s[4] && 'A' == s[5] && 'L' == s[6])    \
+        ||                                                                                                          \
+        ('l' == s[0] && 'i' == s[1] && 't' == s[2] && 'e' == s[3] && 'r' == s[4] && 'a' == s[5] && 'l' == s[6]))    \
+    )
+
 #define BLITZ_STRING_IS_END(s, len)                                                         \
     ((3 == len) &&                                                                          \
         (('E' == s[0] && 'N' == s[1] && 'D' == s[2])                                        \
@@ -258,6 +267,7 @@ ZEND_END_MODULE_GLOBALS(blitz)
 #define BLITZ_NODE_TYPE_END                     (5 << 2 | BLITZ_TYPE_METHOD) /* non-finalized node - will be removed after parsing */
 #define BLITZ_NODE_TYPE_CONTEXT                 (6 << 2 | BLITZ_TYPE_METHOD) /* {{ BEGIN a }} bla-bla {{ END }} */
 #define BLITZ_NODE_TYPE_CONDITION               (7 << 2 | BLITZ_TYPE_METHOD) /* {{ BEGIN a }} bla-bla {{ END }} */
+#define BLITZ_NODE_TYPE_LITERAL                 (8 << 2 | BLITZ_TYPE_METHOD) /* {{ LITERAL }} bla-bla {{ END }} */
 // reserved +3 base types
 
 #define BLITZ_NODE_TYPE_WRAPPER_ESCAPE          (11 << 2 | BLITZ_TYPE_METHOD) 
@@ -372,8 +382,7 @@ typedef struct _blitz_static_data {
     char name[MAXPATHLEN];
     struct _blitz_node *nodes;
     unsigned int n_nodes;
-    char *body;
-    unsigned long body_len;
+	smart_str body;
     HashTable *fetch_index;
     unsigned int tag_open_len;
     unsigned int tag_close_len;
@@ -389,11 +398,11 @@ typedef struct _blitz_tpl {
     struct _blitz_static_data static_data;
     char flags;
     HashTable *hash_globals;
-    zval *iterations;
-    zval **current_iteration;  /* current iteraion values */
-    zval **last_iteration;     /* latest iteration - used in combined iterate+set methods  */
-    zval **current_iteration_parent; /* list of current context iterations (current_iteration is last element in this list) */
-    zval **caller_iteration;  /* caller iteraion */
+    zval iterations;
+    zval *current_iteration;  /* current iteraion values */
+    zval *last_iteration;     /* latest iteration - used in combined iterate+set methods  */
+    zval *current_iteration_parent; /* list of current context iterations (current_iteration is last element in this list) */
+    zval *caller_iteration;  /* caller iteraion */
     char *current_path;
     char *tmp_buf;
     HashTable *ht_tpl_name; /* index template_name -> itpl_list number */
@@ -435,6 +444,7 @@ typedef struct _blitz_analizer_ctx {
     unsigned int true_lexem_len;
     unsigned int n_needs_end;
     unsigned int n_actual_end;
+    unsigned char is_literal;
 } analizer_ctx;
 
 /* call scanner */
@@ -691,7 +701,7 @@ typedef struct _blitz_analizer_ctx {
         i_len = 1;                                                                                  \
     }                                                                                               \
 
-typedef int (*zend_native_function)(zval *, zval *, zval * TSRMLS_CC);
+typedef int (ZEND_FASTCALL *zend_native_function)(zval *, zval *, zval *);
 
 #define BLITZ_OPERATOR_TO_ZEND_NATIVE_FUNCTION(op)                                                  \
     ( (op == BLITZ_EXPR_OPERATOR_ADD) ? add_function :                                              \
@@ -702,44 +712,47 @@ typedef int (*zend_native_function)(zval *, zval *, zval * TSRMLS_CC);
       NULL                                                                                          \
     )
 
-#define BLITZ_CALL_STATE_NEXT_ARG    1
-#define BLITZ_CALL_STATE_FINISHED    2
-#define BLITZ_CALL_STATE_HAS_NEXT    3 
-#define BLITZ_CALL_STATE_BEGIN       4
-#define BLITZ_CALL_STATE_END         5
-#define BLITZ_CALL_STATE_IF          6
-#define BLITZ_CALL_STATE_ELSE        7
-#define BLITZ_CALL_STATE_NEXT_ARG_IF 8
-#define BLITZ_CALL_STATE_ERROR       0
+#define BLITZ_CALL_STATE_NEXT_ARG       1
+#define BLITZ_CALL_STATE_FINISHED       2
+#define BLITZ_CALL_STATE_HAS_NEXT       3 
+#define BLITZ_CALL_STATE_BEGIN          4
+#define BLITZ_CALL_STATE_END            5 
+#define BLITZ_CALL_STATE_IF             6
+#define BLITZ_CALL_STATE_ELSE           7
+#define BLITZ_CALL_STATE_NEXT_ARG_IF    8
+#define BLITZ_CALL_STATE_NEXT_ARG_SCOPE 9
+#define BLITZ_CALL_STATE_LITERAL        10
+#define BLITZ_CALL_STATE_ERROR          0
 
 #define BLITZ_CALL_ERROR             1
 #define BLITZ_CALL_ERROR_IF          2
 #define BLITZ_CALL_ERROR_INCLUDE     3
 #define BLITZ_CALL_ERROR_IF_CONTEXT  4
 
-#define BLITZ_CALL_ERROR_IF_MISSING_BRACKETS     5
-#define BLITZ_CALL_ERROR_IF_NOT_ENOUGH_OPERANDS  6
-#define BLITZ_CALL_ERROR_IF_EMPTY_EXPRESSION     7
-#define BLITZ_CALL_ERROR_IF_TOO_COMPLEX          8
-
+#define BLITZ_CALL_ERROR_IF_MISSING_BRACKETS        5
+#define BLITZ_CALL_ERROR_IF_NOT_ENOUGH_OPERANDS     6
+#define BLITZ_CALL_ERROR_IF_EMPTY_EXPRESSION        7
+#define BLITZ_CALL_ERROR_IF_TOO_COMPLEX             8
 #define BLITZ_CALL_ERROR_IF_METHOD_CALL_TOO_COMPLEX 9
+#define BLITZ_CALL_ERROR_SCOPE                      10
 
 #define BLITZ_ZVAL_NOT_EMPTY(z, res)                                                              \
-    switch (Z_TYPE_PP(z)) {                                                                       \
-        case IS_BOOL: res = (0 == Z_LVAL_PP(z)) ? 0 : 1; break;                                   \
+    switch (Z_TYPE_P(z)) {                                                                        \
+        case IS_TRUE: res = 1; break;                                                             \
+        case IS_FALSE: res = 0; break;                                                            \
         case IS_STRING:                                                                           \
-            if (0 == Z_STRLEN_PP(z)) {                                                            \
+            if (0 == Z_STRLEN_P(z)) {                                                            \
                 res = 0;                                                                          \
-            } else if ((1 == Z_STRLEN_PP(z)) && (Z_STRVAL_PP(z)[0] == '0')) {                     \
+            } else if ((1 == Z_STRLEN_P(z)) && (Z_STRVAL_P(z)[0] == '0')) {                     \
                 res = 0;                                                                          \
             } else {                                                                              \
                 res = 1;                                                                          \
             }                                                                                     \
             break;                                                                                \
-        case IS_LONG: res = (0 == Z_LVAL_PP(z)) ? 0 : 1; break;                                   \
-        case IS_DOUBLE: res = (.0 == Z_DVAL_PP(z)) ? 0 : 1; break;                                \
-        case IS_ARRAY: res = (0 == zend_hash_num_elements(Z_ARRVAL_PP(z))) ? 0 : 1; break;        \
-        case IS_OBJECT: res = (0 == zend_hash_num_elements(Z_OBJPROP_PP(z))) ? 0 : 1; break;      \
+        case IS_LONG: res = (0 == Z_LVAL_P(z)) ? 0 : 1; break;                                   \
+        case IS_DOUBLE: res = (.0 == Z_DVAL_P(z)) ? 0 : 1; break;                                \
+        case IS_ARRAY: res = (0 == zend_hash_num_elements(Z_ARRVAL_P(z))) ? 0 : 1; break;        \
+        case IS_OBJECT: res = (0 == zend_hash_num_elements(Z_OBJPROP_P(z))) ? 0 : 1; break;      \
                                                                                                   \
         default: res = 0; break;                                                                  \
     }
@@ -754,9 +767,10 @@ typedef int (*zend_native_function)(zval *, zval *, zval * TSRMLS_CC);
     } else if ((a).type == BLITZ_ARG_TYPE_NUM) {                                                  \
         (res) = (0 == strncmp((a).name, "0", 1)) ? 0 : 1;                                         \
     } else if (((a).type == BLITZ_ARG_TYPE_VAR) && ht) {                                          \
-        zval **z;                                                                                 \
+        zval *z;                                                                                  \
         if((a).name && (a).len > 0) {                                                             \
-            if (SUCCESS == zend_hash_find(ht, (a).name, 1 + (a).len, (void**)&z))                 \
+            z = zend_hash_str_find(ht, (a).name, (a).len);                                        \
+            if (z != NULL)                                                                        \
             {                                                                                     \
                 BLITZ_ZVAL_NOT_EMPTY(z, res)                                                      \
             } else {                                                                              \
@@ -776,15 +790,15 @@ typedef int (*zend_native_function)(zval *, zval *, zval * TSRMLS_CC);
 #define BLITZ_GET_ARG_ZVAL(a, ht, z)                                                              \
     if (((a).type == BLITZ_ARG_TYPE_VAR) && ht) {                                                 \
         if ((a).name && (a).len>0) {                                                              \
-            zend_hash_find(ht, (a).name, 1 + (a).len, (void**)&z);                                \
+            zend_hash_str_find(ht, (a).name, (a).len, (void**)&z);                                \
         }                                                                                         \
     }                                                                                             
 
 #define BLITZ_HASH_FIND_P(z, k, k_len, out)                                                       \
-    ( (Z_TYPE_P(z) == IS_ARRAY) ? zend_hash_find(Z_ARRVAL_P(z), k, k_len, (void **)out) :         \
-       ( (Z_TYPE_P(z) == IS_OBJECT) ? zend_hash_find(Z_OBJPROP_P(z), k, k_len, (void **)out) :    \
+    ( (Z_TYPE_P(z) == IS_ARRAY) ? zend_hash_str_find(Z_ARRVAL_P(z), k, k_len, (void **)out) :         \
+       ( (Z_TYPE_P(z) == IS_OBJECT) ? zend_hash_str_find(Z_OBJPROP_P(z), k, k_len, (void **)out) :    \
           FAILURE                                                                                 \
-       )                                                                                          \
+       )                                                                                             \
     )
 
 #define BLITZ_REALLOC_RESULT(blen,nlen,rlen,alen,res,pres)                                        \
@@ -793,8 +807,8 @@ typedef int (*zend_native_function)(zval *, zval *, zval * TSRMLS_CC);
         while ((alen) < (nlen)) {                                                                 \
             (alen) <<= 1;                                                                         \
         }                                                                                         \
-        (res) = erealloc((res),(alen + 1)*sizeof(char));                                          \
-        (pres) = (res) + (rlen);                                                                  \
+        (res) = zend_string_extend((res),(alen + 1), 0);                                          \
+        (pres) = ZSTR_VAL(res) + (rlen);                                                          \
     }                                                                                             \
 
 #define BLITZ_FETCH_TPL_RESOURCE(id,tpl,desc)                                                     \
@@ -802,14 +816,15 @@ typedef int (*zend_native_function)(zval *, zval *, zval * TSRMLS_CC);
         RETURN_FALSE;                                                                             \
     }                                                                                             \
                                                                                                   \
-    if (zend_hash_find(Z_OBJPROP_P((id)), "tpl", sizeof("tpl"), (void **)&(desc)) == FAILURE) {   \
-        php_error_docref(NULL TSRMLS_CC, E_WARNING,                                               \
+    desc = zend_hash_str_find(Z_OBJPROP_P((id)), "tpl", sizeof("tpl") - 1);                       \
+    if (!desc || Z_TYPE_P(desc) != IS_RESOURCE) {                                                 \
+        php_error_docref(NULL, E_WARNING,                                               \
             "INTERNAL: template was not loaded/initialized (cannot find template descriptor)"     \
         );                                                                                        \
         RETURN_FALSE;                                                                             \
     }                                                                                             \
-                                                                                                  \
-    ZEND_FETCH_RESOURCE(tpl, blitz_tpl *, desc, -1, "blitz template", le_blitz);                  \
+   \
+    tpl = (blitz_tpl *)zend_fetch_resource(Z_RES_P(desc), "blitz template", le_blitz);            \
     if(!tpl) {                                                                                    \
         RETURN_FALSE;                                                                             \
     }
@@ -819,7 +834,7 @@ typedef int (*zend_native_function)(zval *, zval *, zval * TSRMLS_CC);
 /* loop stack tricks */
 #define BLITZ_LOOP_MOVE_FORWARD(tpl)                                                              \
     if (tpl->loop_stack_level>=BLITZ_LOOP_STACK_MAX) {                                            \
-        php_error_docref(NULL TSRMLS_CC, E_WARNING,                                               \
+        php_error_docref(NULL, E_WARNING,                                               \
             "INTERNAL ERROR: loop stack limit (%u) was exceeded, recompile blitz "                \
             "with BLITZ_LOOP_STACK_MAX increased", BLITZ_LOOP_STACK_MAX);                         \
     } else {                                                                                      \
@@ -841,7 +856,7 @@ typedef int (*zend_native_function)(zval *, zval *, zval * TSRMLS_CC);
         tpl->scope_stack[tpl->scope_stack_pos] = data;                                            \
         tpl->scope_stack_pos++;                                                                   \
     } else {                                                                                      \
-        php_error_docref(NULL TSRMLS_CC, E_WARNING,                                               \
+        php_error_docref(NULL, E_WARNING,                                               \
             "Too deep iteration set, lookup scope depth is too high, lookup stack is broken "     \
             "and variables can be resolved improperly. To fix this rebuild blitz extension with " \
             "increased BLITZ_SCOPE_STACK_MAX constant in php_blitz.h"                             \
@@ -855,7 +870,7 @@ typedef int (*zend_native_function)(zval *, zval *, zval * TSRMLS_CC);
     if (tpl->scope_stack_pos > 0) {                                                               \
         tpl->scope_stack_pos--;                                                                   \
     } else {                                                                                      \
-        php_error_docref(NULL TSRMLS_CC, E_WARNING,                                               \
+        php_error_docref(NULL, E_WARNING,                                               \
             "Too deep iteration set, lookup scope depth is too high, lookup stack is broken "     \
             "and variables can be resolved improperly. To fix this rebuild blitz extension with " \
             "increased BLITZ_SCOPE_STACK_MAX constant in php_blitz.h"                             \
@@ -869,7 +884,7 @@ typedef int (*zend_native_function)(zval *, zval *, zval * TSRMLS_CC);
         stack[stack_level].len = alen;                                                            \
         stack[stack_level].type = atype;                                                          \
     } else {                                                                                      \
-        php_error_docref(NULL TSRMLS_CC, E_WARNING,                                               \
+        php_error_docref(NULL, E_WARNING,                                               \
             "Too complex conditional, operator stack depth is too high and broken, operators "    \
             "will  be resolved improperly. To fix this rebuild blitz extension with increased "   \
             "BLITZ_IF_STACK_MAX constant in php_blitz.h"                                          \

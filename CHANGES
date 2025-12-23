@@ -1,4 +1,36 @@
 ===================================================================================================
+0.10.5 (PHP7) version 11 Oct 2019
+===================================================================================================
+- FIX: crash on empty globals set fixed (https://github.com/alexeyrybak/blitz/issues/62)
+- CHANGE: phpinfo() shows 'Blitz version' instead of 'Version' to simplify 'php -i | grep' usage
+
+===================================================================================================
+0.10.4 (PHP7) version 1 sent 2017. С днём знаний!
+===================================================================================================
+- ADD: optimisations that reduce memory usage and improve performance: smart_str and other. Thanks 
+  to Anton "tony2001" Dovgal.
+
+===================================================================================================
+0.10.3 (PHP7) version ...
+===================================================================================================
+- ADD: {{ literal }} ... {{ end }} blocks are processed literally (analog of literal/verbatim
+  functionality in other template engines) 
+- FIX: bug47 fix ported to PHP7 branch (https://github.com/alexeyrybak/blitz/issues/47)
+
+===================================================================================================
+0.10.2 (PHP7) version 7 dec 2015. ✡ Happy hanukkah! ✡
+===================================================================================================
+- ADD: include scope finally merged, having {{ include('filename.tpl', user=$_.user) }} 
+  you can do {{ $user.name }} in the included templates. Thanks to Nicolas Van Eenaeme 
+  and Yuri Nasretdinov.
+
+===================================================================================================
+0.10.1 (PHP7) version 14 oct 2015
+===================================================================================================
+- CHANGE: this is the first PHP7 port (based on 0.9.1) with all the tests passed as expected. 
+  Many thanks to Anton "tony2001" Dovgal.
+
+===================================================================================================
 0.9.1 version 25 june 2015
 ===================================================================================================
 - FIX: added predefined constant $_i - loop identifier, same as $_num, but starts with 0. 

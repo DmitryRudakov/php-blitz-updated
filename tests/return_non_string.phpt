@@ -1,5 +1,9 @@
 --TEST--
 returning non-strings from user methods
+--SKIPIF--
+<?php
+	if (PHP_VERSION_ID >= 80000) echo("SKIP: PHP8 Throws exceptions: can't run");
+?>
 --FILE---
 <?php
 include('common.inc');
@@ -21,25 +25,41 @@ class Tpl extends Blitz
 
 $T = new Tpl();
 $T->load("{{get_array()}} {{get_number()}} {{get_object()}}");
-echo $T->parse();
+$body = $T->parse();
 
 $ver = (int)phpversion();
-if($ver>4) {
+if ($ver >= 7) {
+    $test_errors = array(
+        "Array to string conversion",
+        "Object of class blitz could not be converted to string"
+    );
+} elseif($ver >= 5) {
     $test_errors = array(
         "Array to string conversion",
         "Object of class blitz could not be converted to string",
-        "Object of class blitz to string conversion");
+        "Object of class blitz to string conversion"
+    );
 } else {
     $test_errors = array(
         "Array to string conversion",
         "Object to string conversion");
 }
 
-if($global_errors === join($test_errors)) {
-    echo "\nmessages OK\n";
+if ($ver<=5) {
+    if ($body === 'Array 2006 Object') {
+        echo "body OK\n";
+    }
+} elseif ($ver >= 7) {
+    if ($body === 'Array 2006 ') {
+        echo "body OK\n";
+    }
+}
+
+if ($global_errors === join($test_errors)) {
+    echo "messages OK\n";
 }
 
 ?>
 --EXPECT--
-Array 2006 Object
+body OK
 messages OK
